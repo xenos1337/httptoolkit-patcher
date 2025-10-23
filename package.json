@@ -1,0 +1,35 @@
+{
+	"name": "httptoolkit-patcher",
+	"version": "2.0.5",
+	"description": "HTTP Toolkit Pro Patcher",
+	"main": "index.js",
+	"type": "module",
+	"bin": "index.js",
+	"scripts": {
+		"start": "node index.js",
+		"patch": "node index.js patch",
+		"unpatch": "node index.js unpatch",
+		"restore": "node index.js restore",
+		"build": "esbuild index.js --bundle --platform=node --format=cjs --target=node18 --outfile=dist/bundle.cjs --external:@electron/asar --external:chalk"
+	},
+	"pkg": {
+		"targets": [
+			"node18-win-x64",
+			"node18-linux-x64",
+			"node18-linux-arm64",
+			"node18-macos-x64",
+			"node18-macos-arm64"
+		],
+		"outputPath": "dist"
+	},
+	"license": "MIT",
+	"dependencies": {
+		"@electron/asar": "^3.2.9",
+		"chalk": "4"
+	},
+	"devDependencies": {
+		"@types/node": "^20.14.9",
+		"esbuild": "^0.25.11",
+		"pkg": "^5.8.1"
+	}
+}
