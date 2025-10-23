@@ -2,7 +2,7 @@
 
 A minimal, cross-platform patcher for HTTP Toolkit that removes subscription requirements.
 
-![WindowsTerminal_BsiVsdyUoj](https://github.com/user-attachments/assets/f21dda33-9334-4b6d-b8ae-6cd51937b3cd)
+![WindowsTerminal_BsiVsdyUoj](https://github.com/user-attachments/assets/20a226f3-4620-4a0e-b1df-8cc55609203c)
 
 ## Why?
 
