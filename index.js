@@ -130,7 +130,14 @@ const requestElevation = async () => {
 			console.error(chalk.redBright`[-] Please run as administrator manually`);
 			process.exit(1);
 		}
+	} else if (isLinux) {
+		// Linux: Cannot auto-elevate with sudo, show instructions instead
+		console.log(chalk.yellowBright`[!] Elevated permissions are required for patching on Linux`);
+		console.log(chalk.yellowBright`[!] Please re-run this script with sudo:`);
+		console.log(chalk.blueBright`    sudo node ${__filename}`);
+		process.exit(1);
 	} else {
+		// macOS: Try to elevate with sudo
 		console.log(chalk.blueBright`[+] Restarting with sudo...`);
 		try {
 			const child = spawn("sudo", ["node", __filename], {
@@ -398,14 +405,21 @@ const patchApp = async () => {
 	// Step 12: Open HTTP Toolkit as detached process
 	console.log(chalk.blueBright`[+] Opening HTTP Toolkit...`);
 	try {
-		const command = isWin ? `"${path.resolve(appPath, "..", "HTTP Toolkit.exe")}"` : isMac ? 'open -a "HTTP Toolkit"' : "httptoolkit";
-		const child = spawn(command, {
-			stdio: "ignore",
-			shell: true,
-			detached: true,
-		});
-		child.unref(); // Completely detach the child process
-		console.log(chalk.greenBright`[+] HTTP Toolkit launched successfully`);
+		if (isLinux) {
+			// Linux: Cannot auto-launch reliably, show manual instructions
+			console.log(chalk.yellowBright`[!] HTTP Toolkit has been successfully patched`);
+			console.log(chalk.yellowBright`[!] Please manually launch HTTP Toolkit from your applications menu or using the command:`);
+			console.log(chalk.blueBright`    httptoolkit`);
+		} else {
+			const command = isWin ? `"${path.resolve(appPath, "..", "HTTP Toolkit.exe")}"` : isMac ? 'open -a "HTTP Toolkit"' : "httptoolkit";
+			const child = spawn(command, {
+				stdio: "ignore",
+				shell: true,
+				detached: true,
+			});
+			child.unref(); // Completely detach the child process
+			console.log(chalk.greenBright`[+] HTTP Toolkit launched successfully`);
+		}
 	} catch (e) {
 		console.error(chalk.yellowBright`[!] Could not auto-start HTTP Toolkit: ${e.message}`);
 		console.log(chalk.blueBright`[+] Please start HTTP Toolkit manually`);
