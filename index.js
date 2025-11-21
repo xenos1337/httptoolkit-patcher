@@ -329,10 +329,10 @@ const patchApp = async () => {
 	asar.extractAll(asarPath, extractPath);
 	console.log(chalk.greenBright`[+] Extracted to ${extractPath}`);
 
-	// Step 6: Check if preload.js exists
-	const preloadPath = path.join(extractPath, "build", "preload.js");
+	// Step 6: Check if preload.cjs exists
+	const preloadPath = path.join(extractPath, "build", "preload.cjs");
 	if (!fs.existsSync(preloadPath)) {
-		console.error(chalk.redBright`[-] preload.js not found at ${preloadPath}`);
+		console.error(chalk.redBright`[-] preload.cjs not found at ${preloadPath}`);
 		rm(extractPath);
 		process.exit(1);
 	}
@@ -347,7 +347,7 @@ const patchApp = async () => {
 	}
 	console.log(chalk.greenBright`[+] Inject code fetched successfully`);
 
-	// Step 8: Read preload.js and check if already patched
+	// Step 8: Read preload.cjs and check if already patched
 	let preloadContent = fs.readFileSync(preloadPath, "utf-8");
 	const isPatched = preloadContent.includes("injectPageContextHooks");
 
@@ -379,7 +379,7 @@ const patchApp = async () => {
 		}
 
 		if (insertIndex === -1) {
-			console.error(chalk.redBright`[-] Could not find insertion point (electron_1) in preload.js`);
+			console.error(chalk.redBright`[-] Could not find insertion point (electron_1) in preload.cjs`);
 			rm(extractPath);
 			process.exit(1);
 		}
@@ -388,9 +388,9 @@ const patchApp = async () => {
 		preloadContent = lines.join("\n");
 	}
 
-	// Step 9: Write patched preload.js
+	// Step 9: Write patched preload.cjs
 	fs.writeFileSync(preloadPath, preloadContent, "utf-8");
-	console.log(chalk.greenBright`[+] preload.js patched successfully`);
+	console.log(chalk.greenBright`[+] preload.cjs patched successfully`);
 
 	// Step 10: Repackage app.asar
 	console.log(chalk.yellowBright`[+] Repackaging app.asar...`);
