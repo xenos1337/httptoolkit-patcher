@@ -9,18 +9,7 @@
 		"start": "node index.js",
 		"patch": "node index.js patch",
 		"unpatch": "node index.js unpatch",
-		"restore": "node index.js restore",
-		"build": "esbuild index.js --bundle --platform=node --format=cjs --target=node18 --outfile=dist/bundle.cjs --external:@electron/asar --external:chalk"
-	},
-	"pkg": {
-		"targets": [
-			"node18-win-x64",
-			"node18-linux-x64",
-			"node18-linux-arm64",
-			"node18-macos-x64",
-			"node18-macos-arm64"
-		],
-		"outputPath": "dist"
+		"restore": "node index.js restore"
 	},
 	"license": "MIT",
 	"dependencies": {
@@ -28,8 +17,6 @@
 		"chalk": "4"
 	},
 	"devDependencies": {
-		"@types/node": "^20.14.9",
-		"esbuild": "^0.25.11",
-		"pkg": "^5.8.1"
+		"@types/node": "^20.14.9"
 	}
 }

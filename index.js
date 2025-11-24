@@ -15,19 +15,16 @@ const isLinux = process.platform === "linux";
 // Handle both ESM and pkg-bundled scenarios
 const __filename = (() => {
 	// Check if running as pkg bundle
+	// @ts-ignore - pkg adds this property at runtime
 	if (process.pkg) {
 		return process.execPath;
 	}
-	// Check if import.meta.url exists (ESM)
-	if (typeof import.meta !== 'undefined' && import.meta.url) {
-		return fileURLToPath(import.meta.url);
-	}
-	// Fallback to __filename if in CommonJS
-	return typeof __filename !== 'undefined' ? __filename : process.argv[1];
+	// ESM: use import.meta.url
+	return fileURLToPath(import.meta.url);
 })();
 
 // Check if running with elevated privileges
-const isElevated = () => {
+function isElevated() {
 	if (isWin) {
 		try {
 			execSync("net session", { stdio: "ignore" });
@@ -38,10 +35,10 @@ const isElevated = () => {
 	} else {
 		return process.getuid && process.getuid() === 0;
 	}
-};
+}
 
 // Helper function to prompt user for input
-const prompt = question => {
+function prompt(question) {
 	const rl = readline.createInterface({
 		input: process.stdin,
 		output: process.stdout,
@@ -52,10 +49,10 @@ const prompt = question => {
 			resolve(answer);
 		});
 	});
-};
+}
 
 // Helper function to fetch content from URL
-const fetchUrl = url => {
+function fetchUrl(url) {
 	return new Promise((resolve, reject) => {
 		https
 			.get(url, res => {
@@ -65,10 +62,10 @@ const fetchUrl = url => {
 			})
 			.on("error", reject);
 	});
-};
+}
 
 // Helper function to remove directory recursively
-const rm = dirPath => {
+function rm(dirPath) {
 	if (!fs.existsSync(dirPath)) return;
 	if (!fs.lstatSync(dirPath).isDirectory()) return fs.rmSync(dirPath, { force: true });
 	for (const entry of fs.readdirSync(dirPath)) {
@@ -77,10 +74,10 @@ const rm = dirPath => {
 		else fs.rmSync(entryPath, { force: true });
 	}
 	fs.rmdirSync(dirPath);
-};
+}
 
 // Find HTTP Toolkit installation path
-const findAppPath = async () => {
+async function findAppPath() {
 	const possiblePaths = isWin ? [path.join("C:", "Program Files", "HTTP Toolkit", "resources"), path.join("C:", "Program Files (x86)", "HTTP Toolkit", "resources")] : isMac ? ["/Applications/HTTP Toolkit.app/Contents/Resources"] : ["/opt/HTTP Toolkit/resources", "/opt/httptoolkit/resources"];
 
 	for (const p of possiblePaths) {
@@ -109,20 +106,27 @@ const findAppPath = async () => {
 	}
 
 	return resourcesPath;
-};
+}
 
 // Request elevated permissions
-const requestElevation = async () => {
+async function requestElevation() {
 	console.log(chalk.yellowBright`[!] Requesting elevated permissions...`);
+
+	// @ts-ignore - pkg adds this property at runtime
+	const isBundled = process.pkg;
 
 	if (isWin) {
 		// Windows: Use PowerShell to run as administrator
-		const script = `Start-Process -FilePath "node" -ArgumentList '"${__filename}"' -Verb RunAs`;
+		let script;
+		if (isBundled) {
+			script = `Start-Process -FilePath "${__filename}" -Verb RunAs`;
+		} else {
+			script = `Start-Process -FilePath "node" -ArgumentList "${__filename}" -Verb RunAs`;
+		}
+
 		try {
-			spawn("powershell", ["-Command", script], {
-				stdio: "inherit",
-				shell: true,
-			});
+			console.log(chalk.greenBright`[+] Spawning PowerShell with script: ${script}`);
+			execSync(`powershell -Command "${script}"`, { stdio: "inherit" });
 			console.log(chalk.blueBright`[+] Restarting with administrator privileges...`);
 			process.exit(0);
 		} catch (e) {
@@ -134,15 +138,26 @@ const requestElevation = async () => {
 		// Linux: Cannot auto-elevate with sudo, show instructions instead
 		console.log(chalk.yellowBright`[!] Elevated permissions are required for patching on Linux`);
 		console.log(chalk.yellowBright`[!] Please re-run this script with sudo:`);
-		console.log(chalk.blueBright`    sudo node ${__filename}`);
+		if (isBundled) {
+			console.log(chalk.blueBright`    sudo ${__filename}`);
+		} else {
+			console.log(chalk.blueBright`    sudo node ${__filename}`);
+		}
 		process.exit(1);
 	} else {
 		// macOS: Try to elevate with sudo
 		console.log(chalk.blueBright`[+] Restarting with sudo...`);
 		try {
-			const child = spawn("sudo", ["node", __filename], {
-				stdio: "inherit",
-			});
+			let child;
+			if (isBundled) {
+				child = spawn("sudo", [__filename], {
+					stdio: "inherit",
+				});
+			} else {
+				child = spawn("sudo", ["node", __filename], {
+					stdio: "inherit",
+				});
+			}
 			child.on("exit", code => process.exit(code || 0));
 		} catch (e) {
 			console.error(chalk.redBright`[-] Failed to elevate permissions: ${e.message}`);
@@ -150,20 +165,34 @@ const requestElevation = async () => {
 			process.exit(1);
 		}
 	}
-};
+}
 
 // Check if we have write permissions
-const checkPermissions = filePath => {
+function checkPermissions(filePath) {
 	try {
+		// Check write access to the file/directory
 		fs.accessSync(filePath, fs.constants.W_OK);
+		
+		// Check if we can create directories
+		const testDirPath = path.join(path.dirname(filePath), `.test_${Date.now()}`);
+		try {
+			fs.mkdirSync(testDirPath, { recursive: true });
+			fs.rmdirSync(testDirPath);
+		} catch (dirError) {
+			console.error(chalk.redBright`[-] Cannot create directories in ${path.dirname(filePath)}: ${dirError.message}`);
+			return false;
+		}
+		
+		console.log(chalk.greenBright`[+] Permissions check passed for ${filePath}`);
 		return true;
 	} catch (e) {
+		console.error(chalk.redBright`[-] Permissions check failed for ${filePath}: ${e.message}`);
 		return false;
 	}
-};
+}
 
 // Kill HTTP Toolkit processes
-const killHttpToolkit = async () => {
+async function killHttpToolkit() {
 	console.log(chalk.yellowBright`[+] Checking for running HTTP Toolkit processes...`);
 
 	try {
@@ -206,10 +235,10 @@ const killHttpToolkit = async () => {
 		console.log(chalk.yellowBright`[!] Could not check/kill processes: ${e.message}`);
 		console.log(chalk.yellowBright`[!] If HTTP Toolkit is running, please close it manually`);
 	}
-};
+}
 
 // Unpatch/restore function
-const unpatchApp = async () => {
+async function unpatchApp() {
 	console.log(chalk.blueBright`[+] HTTP Toolkit Unpatcher Started`);
 
 	// Step 1: Find app path
@@ -236,13 +265,7 @@ const unpatchApp = async () => {
 		}
 
 		console.log(chalk.yellowBright`[!] Administrator/sudo privileges required for unpatching`);
-		const answer = await prompt("Do you want to request elevated permissions? [Y/n]: ");
-		if (!answer || answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
-			await requestElevation();
-		} else {
-			console.log(chalk.redBright`[-] Cannot proceed without write permissions`);
-			process.exit(1);
-		}
+		await requestElevation();
 	}
 
 	// Step 4: Check if backup exists
@@ -277,10 +300,10 @@ const unpatchApp = async () => {
 	}
 
 	console.log(chalk.greenBright`[+] Successfully unpatched!`);
-};
+}
 
 // Main patching function
-const patchApp = async () => {
+async function patchApp() {
 	console.log(chalk.blueBright`[+] HTTP Toolkit Patcher Started`);
 
 	// Step 1: Find app path
@@ -305,13 +328,7 @@ const patchApp = async () => {
 		}
 
 		console.log(chalk.yellowBright`[!] Administrator/sudo privileges required for patching`);
-		const answer = await prompt("Do you want to request elevated permissions? [Y/n]: ");
-		if (!answer || answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
-			await requestElevation();
-		} else {
-			console.log(chalk.redBright`[-] Cannot proceed without write permissions`);
-			process.exit(1);
-		}
+		await requestElevation();
 	}
 
 	// Step 4: Backup app.asar
@@ -329,12 +346,19 @@ const patchApp = async () => {
 	asar.extractAll(asarPath, extractPath);
 	console.log(chalk.greenBright`[+] Extracted to ${extractPath}`);
 
-	// Step 6: Check if preload.cjs exists
-	const preloadPath = path.join(extractPath, "build", "preload.cjs");
+	// Step 6: Check if preload.cjs or preload.js exists
+	let preloadPath = path.join(extractPath, "build", "preload.cjs");
 	if (!fs.existsSync(preloadPath)) {
-		console.error(chalk.redBright`[-] preload.cjs not found at ${preloadPath}`);
-		rm(extractPath);
-		process.exit(1);
+		console.log(chalk.yellowBright`[!] preload.cjs not found, checking for preload.js...`);
+		preloadPath = path.join(extractPath, "build", "preload.js");
+		if (!fs.existsSync(preloadPath)) {
+			console.error(chalk.redBright`[-] Neither preload.cjs nor preload.js found in ${path.join(extractPath, "build")}`);
+			rm(extractPath);
+			process.exit(1);
+		}
+		console.log(chalk.greenBright`[+] Found preload.js`);
+	} else {
+		console.log(chalk.greenBright`[+] Found preload.cjs`);
 	}
 
 	// Step 7: Fetch inject.js from GitHub
@@ -347,7 +371,7 @@ const patchApp = async () => {
 	}
 	console.log(chalk.greenBright`[+] Inject code fetched successfully`);
 
-	// Step 8: Read preload.cjs and check if already patched
+	// Step 8: Read preload file and check if already patched
 	let preloadContent = fs.readFileSync(preloadPath, "utf-8");
 	const isPatched = preloadContent.includes("injectPageContextHooks");
 
@@ -379,7 +403,7 @@ const patchApp = async () => {
 		}
 
 		if (insertIndex === -1) {
-			console.error(chalk.redBright`[-] Could not find insertion point (electron_1) in preload.cjs`);
+			console.error(chalk.redBright`[-] Could not find insertion point (electron_1) in ${path.basename(preloadPath)}`);
 			rm(extractPath);
 			process.exit(1);
 		}
@@ -388,9 +412,9 @@ const patchApp = async () => {
 		preloadContent = lines.join("\n");
 	}
 
-	// Step 9: Write patched preload.cjs
+	// Step 9: Write patched preload file
 	fs.writeFileSync(preloadPath, preloadContent, "utf-8");
-	console.log(chalk.greenBright`[+] preload.cjs patched successfully`);
+	console.log(chalk.greenBright`[+] ${path.basename(preloadPath)} patched successfully`);
 
 	// Step 10: Repackage app.asar
 	console.log(chalk.yellowBright`[+] Repackaging app.asar...`);
@@ -417,21 +441,26 @@ const patchApp = async () => {
 				shell: true,
 				detached: true,
 			});
-			child.unref(); // Completely detach the child process
+			child.unref();
 			console.log(chalk.greenBright`[+] HTTP Toolkit launched successfully`);
 		}
 	} catch (e) {
 		console.error(chalk.yellowBright`[!] Could not auto-start HTTP Toolkit: ${e.message}`);
 		console.log(chalk.blueBright`[+] Please start HTTP Toolkit manually`);
 	}
-};
+}
 
-// Parse command line arguments
 const args = process.argv.slice(2);
 const command = args[0];
 
-// Get the command name for display
-const commandName = process.pkg ? path.basename(__filename) : 'node index.js';
+const commandName = (() => {
+	// @ts-ignore - pkg adds this property at runtime
+	if (process.pkg) {
+		return path.basename(__filename);
+	} else {
+		return `node ${process.argv[1]}`;
+	}
+})();
 
 // Run the appropriate command
 (async () => {
