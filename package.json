@@ -1,10 +1,11 @@
 {
 	"name": "httptoolkit-patcher",
-	"version": "2.0.5",
+	"version": "2.0.8",
 	"description": "HTTP Toolkit Pro Patcher",
 	"main": "index.js",
 	"type": "module",
 	"bin": "index.js",
+	"author": "xenos1337",
 	"scripts": {
 		"start": "node index.js",
 		"patch": "node index.js patch",

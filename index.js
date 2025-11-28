@@ -96,12 +96,6 @@ function fetchJson(url) {
 	});
 }
 
-/**
- * Compare two semver version strings
- * @param {string} v1
- * @param {string} v2
- * @returns {number} 1 if v1 > v2, -1 if v1 < v2, 0 if equal
- */
 function compareVersions(v1, v2) {
 	const normalize = (/** @type {string} */ v) => v.replace(/^v/, "").split(".").map(Number);
 	const parts1 = normalize(v1);
@@ -133,8 +127,8 @@ async function checkForUpdates() {
 		
 		if (compareVersions(latestVersion, LOCAL_VERSION) > 0) {
 			console.log(chalk.yellowBright`\n╔════════════════════════════════════════════════════════════╗`);
-			console.log(chalk.yellowBright`║` + chalk.white`  A new version is available: ` + chalk.greenBright`v${latestVersion}` + chalk.white` (current: ` + chalk.gray`v${LOCAL_VERSION}` + chalk.white`)  ` + chalk.yellowBright`║`);
-			console.log(chalk.yellowBright`║` + chalk.white`  Update: ` + chalk.cyanBright`https://github.com/${GITHUB_REPO}` + chalk.white`      ` + chalk.yellowBright`║`);
+			console.log(chalk.yellowBright`║` + chalk.white`  A new version is available: ` + chalk.greenBright`v${latestVersion}` + chalk.white` (current: ` + chalk.gray`v${LOCAL_VERSION}` + chalk.white`)  ` + chalk.yellowBright`    ║`);
+			console.log(chalk.yellowBright`║` + chalk.white`  Update: ` + chalk.cyanBright`https://github.com/${GITHUB_REPO}` + chalk.white`  ` + chalk.yellowBright`║`);
 			console.log(chalk.yellowBright`╚════════════════════════════════════════════════════════════╝\n`);
 		}
 	} catch (e) {
