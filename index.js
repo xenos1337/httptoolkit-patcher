@@ -51,19 +51,6 @@ function prompt(question) {
 	});
 }
 
-// Helper function to fetch content from URL
-function fetchUrl(url) {
-	return new Promise((resolve, reject) => {
-		https
-			.get(url, res => {
-				let data = "";
-				res.on("data", chunk => (data += chunk));
-				res.on("end", () => resolve(data));
-			})
-			.on("error", reject);
-	});
-}
-
 // Helper function to remove directory recursively
 function rm(dirPath) {
 	if (!fs.existsSync(dirPath)) return;
@@ -78,7 +65,7 @@ function rm(dirPath) {
 
 // Find HTTP Toolkit installation path
 async function findAppPath() {
-	const possiblePaths = isWin ? [path.join("C:", "Program Files", "HTTP Toolkit", "resources"), path.join("C:", "Program Files (x86)", "HTTP Toolkit", "resources")] : isMac ? ["/Applications/HTTP Toolkit.app/Contents/Resources"] : ["/opt/HTTP Toolkit/resources", "/opt/httptoolkit/resources"];
+	const possiblePaths = isWin ? [path.join("C:", "Program Files", "HTTP Toolkit", "resources"), path.join("C:", "Program Files (x86)", "HTTP Toolkit", "resources"), path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || "", "AppData", "Local"), "Programs", "HTTP Toolkit", "resources")] : isMac ? ["/Applications/HTTP Toolkit.app/Contents/Resources"] : ["/opt/HTTP Toolkit/resources", "/opt/httptoolkit/resources"];
 
 	for (const p of possiblePaths) {
 		if (fs.existsSync(path.join(p, "app.asar"))) {
@@ -346,37 +333,71 @@ async function patchApp() {
 	asar.extractAll(asarPath, extractPath);
 	console.log(chalk.greenBright`[+] Extracted to ${extractPath}`);
 
-	// Step 6: Check if preload.cjs or preload.js exists
-	let preloadPath = path.join(extractPath, "build", "preload.cjs");
+	// Step 6: Check if preload.cjs exists
+	const preloadPath = path.join(extractPath, "build", "preload.cjs");
 	if (!fs.existsSync(preloadPath)) {
-		console.log(chalk.yellowBright`[!] preload.cjs not found, checking for preload.js...`);
-		preloadPath = path.join(extractPath, "build", "preload.js");
-		if (!fs.existsSync(preloadPath)) {
-			console.error(chalk.redBright`[-] Neither preload.cjs nor preload.js found in ${path.join(extractPath, "build")}`);
-			rm(extractPath);
-			process.exit(1);
-		}
-		console.log(chalk.greenBright`[+] Found preload.js`);
-	} else {
-		console.log(chalk.greenBright`[+] Found preload.cjs`);
-	}
-
-	// Step 7: Fetch inject.js from GitHub
-	console.log(chalk.yellowBright`[+] Fetching inject code from GitHub...`);
-	const injectCode = await fetchUrl("https://raw.githubusercontent.com/xenos1337/httptoolkit-patcher/refs/heads/master/inject.js");
-	if (!injectCode || !injectCode.includes("injectPageContextHooks")) {
-		console.error(chalk.redBright`[-] Failed to fetch inject.js from GitHub`);
+		console.error(chalk.redBright`[-] preload.cjs not found in ${path.join(extractPath, "build")}`);
+		console.error(chalk.yellowBright`[!] Please download the latest version of HTTP Toolkit from https://httptoolkit.com/`);
 		rm(extractPath);
 		process.exit(1);
 	}
-	console.log(chalk.greenBright`[+] Inject code fetched successfully`);
+	console.log(chalk.greenBright`[+] Found preload.cjs`);
 
-	// Step 8: Read preload file and check if already patched
+	// Step 7: Read inject.js from local file (same directory as this script)
+	console.log(chalk.yellowBright`[+] Reading inject code from local file...`);
+	const injectJsPath = path.join(path.dirname(__filename), "inject.js");
+	if (!fs.existsSync(injectJsPath)) {
+		console.error(chalk.redBright`[-] inject.js not found at ${injectJsPath}`);
+		rm(extractPath);
+		process.exit(1);
+	}
+	const injectCode = fs.readFileSync(injectJsPath, "utf-8");
+	if (!injectCode || !injectCode.includes("PAGE-INJECT")) {
+		console.error(chalk.redBright`[-] Invalid inject.js file`);
+		rm(extractPath);
+		process.exit(1);
+	}
+	console.log(chalk.greenBright`[+] Inject code loaded successfully`);
+
+	const preloadPatchCode = `
+(function loadInjectScript() {
+	const injectCode = ${JSON.stringify(injectCode)};
+	
+	function injectViaWebFrame() {
+		try {
+			const { webFrame } = electron_1;
+			if (webFrame && webFrame.executeJavaScript) {
+				webFrame.executeJavaScript(injectCode).then(() => console.log("[PRELOAD] Injected via webFrame.executeJavaScript")).catch(err => console.error("[PRELOAD] webFrame injection failed:", err));
+				return true;
+			}
+		} catch (e) {
+			console.error("[PRELOAD] webFrame not available:", e);
+		}
+		return false;
+	}
+	
+	if (!injectViaWebFrame()) {
+		const tryInject = () => {
+			if (!injectViaWebFrame()) {
+				console.error("[PRELOAD] All injection methods failed");
+			}
+		};
+		
+		if (document.readyState === 'complete' || document.readyState === 'interactive') {
+			tryInject();
+		} else {
+			document.addEventListener('DOMContentLoaded', tryInject, { once: true });
+		}
+	}
+})();
+`;
+
+	// Step 8: Read files and check if already patched
 	let preloadContent = fs.readFileSync(preloadPath, "utf-8");
-	const isPatched = preloadContent.includes("injectPageContextHooks");
+	const isPreloadPatched = preloadContent.includes("loadInjectScript");
 
-	if (isPatched) {
-		console.log(chalk.yellowBright`[!] File already patched`);
+	if (isPreloadPatched) {
+		console.log(chalk.yellowBright`[!] Files already patched`);
 		const answer = await prompt("Do you want to repatch? (y/n): ");
 
 		if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") {
@@ -385,36 +406,39 @@ async function patchApp() {
 			process.exit(0);
 		}
 
-		// Replace the existing injectPageContextHooks function
-		console.log(chalk.yellowBright`[+] Replacing existing patch...`);
-		const functionRegex = /\(function injectPageContextHooks\(\) \{[\s\S]*?\}\)\(\);/;
-		preloadContent = preloadContent.replace(functionRegex, injectCode);
-	} else {
-		// Find line with electron_1 and insert inject code below it
-		console.log(chalk.yellowBright`[+] Applying patch...`);
-		const lines = preloadContent.split("\n");
-		let insertIndex = -1;
-
-		for (let i = 0; i < lines.length; i++) {
-			if (lines[i].includes("electron_1")) {
-				insertIndex = i + 1;
-				break;
-			}
-		}
-
-		if (insertIndex === -1) {
-			console.error(chalk.redBright`[-] Could not find insertion point (electron_1) in ${path.basename(preloadPath)}`);
-			rm(extractPath);
-			process.exit(1);
-		}
-
-		lines.splice(insertIndex, 0, injectCode);
-		preloadContent = lines.join("\n");
+		// Remove existing patches
+		console.log(chalk.yellowBright`[+] Replacing existing patches...`);
+		
+		// Remove preload patch
+		const preloadPatchRegex = /\n?\(function loadInjectScript\(\) \{[\s\S]*?\}\)\(\);/;
+		preloadContent = preloadContent.replace(preloadPatchRegex, "");
 	}
 
-	// Step 9: Write patched preload file
+	// Step 9: Patch preload file - find line with electron_1 and insert patch code below it
+	console.log(chalk.yellowBright`[+] Applying preload patch...`);
+	const preloadLines = preloadContent.split("\n");
+	let preloadInsertIndex = -1;
+
+	for (let i = 0; i < preloadLines.length; i++) {
+		if (preloadLines[i].includes("electron_1")) {
+			preloadInsertIndex = i + 1;
+			break;
+		}
+	}
+
+	if (preloadInsertIndex === -1) {
+		console.error(chalk.redBright`[-] Could not find insertion point (electron_1) in ${path.basename(preloadPath)}`);
+		rm(extractPath);
+		process.exit(1);
+	}
+
+	preloadLines.splice(preloadInsertIndex, 0, preloadPatchCode);
+	preloadContent = preloadLines.join("\n");
+
+	// Write patched preload file
 	fs.writeFileSync(preloadPath, preloadContent, "utf-8");
 	console.log(chalk.greenBright`[+] ${path.basename(preloadPath)} patched successfully`);
+
 
 	// Step 10: Repackage app.asar
 	console.log(chalk.yellowBright`[+] Repackaging app.asar...`);
