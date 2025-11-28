@@ -8,10 +8,6 @@ import readline from "readline";
 import https from "https";
 import { fileURLToPath } from "url";
 
-// Version info
-const LOCAL_VERSION = "2.0.8";
-const GITHUB_REPO = "xenos1337/httptoolkit-patcher";
-
 const isWin = process.platform === "win32";
 const isMac = process.platform === "darwin";
 const isLinux = process.platform === "linux";
@@ -25,6 +21,18 @@ const __filename = (() => {
 	}
 	// ESM: use import.meta.url
 	return fileURLToPath(import.meta.url);
+})();
+
+// Version info - read from package.json
+const GITHUB_REPO = "xenos1337/httptoolkit-patcher";
+const LOCAL_VERSION = (() => {
+	try {
+		const packageJsonPath = path.join(path.dirname(__filename), "package.json");
+		const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+		return packageJson.version || "0.0.0";
+	} catch {
+		return "0.0.0";
+	}
 })();
 
 // Check if running with elevated privileges
