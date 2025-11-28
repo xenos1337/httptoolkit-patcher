@@ -8,6 +8,10 @@ import readline from "readline";
 import https from "https";
 import { fileURLToPath } from "url";
 
+// Version info
+const LOCAL_VERSION = "2.0.8";
+const GITHUB_REPO = "xenos1337/httptoolkit-patcher";
+
 const isWin = process.platform === "win32";
 const isMac = process.platform === "darwin";
 const isLinux = process.platform === "linux";
@@ -49,6 +53,85 @@ function prompt(question) {
 			resolve(answer);
 		});
 	});
+}
+
+/**
+ * Fetch JSON from a URL
+ * @param {string} url
+ * @returns {Promise<Array<{name: string}>>}
+ */
+function fetchJson(url) {
+	return new Promise((resolve, reject) => {
+		const options = {
+			headers: {
+				"User-Agent": "httptoolkit-patcher",
+				"Accept": "application/vnd.github.v3+json",
+			},
+		};
+		https
+			.get(url, options, res => {
+				if (res.statusCode !== 200) {
+					reject(new Error(`HTTP ${res.statusCode}`));
+					return;
+				}
+				let data = "";
+				res.on("data", chunk => (data += chunk));
+				res.on("end", () => {
+					try {
+						resolve(JSON.parse(data));
+					} catch (e) {
+						reject(e);
+					}
+				});
+			})
+			.on("error", reject);
+	});
+}
+
+/**
+ * Compare two semver version strings
+ * @param {string} v1
+ * @param {string} v2
+ * @returns {number} 1 if v1 > v2, -1 if v1 < v2, 0 if equal
+ */
+function compareVersions(v1, v2) {
+	const normalize = (/** @type {string} */ v) => v.replace(/^v/, "").split(".").map(Number);
+	const parts1 = normalize(v1);
+	const parts2 = normalize(v2);
+	
+	for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+		const num1 = parts1[i] || 0;
+		const num2 = parts2[i] || 0;
+		if (num1 > num2) return 1;
+		if (num1 < num2) return -1;
+	}
+	return 0;
+}
+
+/**
+ * Check for updates from GitHub
+ */
+async function checkForUpdates() {
+	try {
+		const tags = await fetchJson(`https://api.github.com/repos/${GITHUB_REPO}/tags`);
+		
+		if (!tags || tags.length === 0) {
+			return; // No tags found, skip update check
+		}
+		
+		// Tags are returned in order, first one is the latest
+		const latestTag = tags[0].name;
+		const latestVersion = latestTag.replace(/^v/, "");
+		
+		if (compareVersions(latestVersion, LOCAL_VERSION) > 0) {
+			console.log(chalk.yellowBright`\n╔════════════════════════════════════════════════════════════╗`);
+			console.log(chalk.yellowBright`║` + chalk.white`  A new version is available: ` + chalk.greenBright`v${latestVersion}` + chalk.white` (current: ` + chalk.gray`v${LOCAL_VERSION}` + chalk.white`)  ` + chalk.yellowBright`║`);
+			console.log(chalk.yellowBright`║` + chalk.white`  Update: ` + chalk.cyanBright`https://github.com/${GITHUB_REPO}` + chalk.white`      ` + chalk.yellowBright`║`);
+			console.log(chalk.yellowBright`╚════════════════════════════════════════════════════════════╝\n`);
+		}
+	} catch (e) {
+		// Silently ignore update check errors (network issues, etc.)
+	}
 }
 
 // Helper function to remove directory recursively
@@ -489,6 +572,9 @@ const commandName = (() => {
 // Run the appropriate command
 (async () => {
 	try {
+		// Check for updates from GitHub
+		await checkForUpdates();
+		
 		if (command === "unpatch" || command === "restore") {
 			await unpatchApp();
 		} else if (command === "help" || command === "-h" || command === "--help") {
