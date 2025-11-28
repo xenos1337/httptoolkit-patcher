@@ -20,10 +20,6 @@ The patcher intercepts HTTP Toolkit's authentication functions:
 
 By hooking these functions, we bypass the subscription checks entirely.
 
-### Can They Fix It?
-
-Yes, but they most likely won't. Fixing this would require changing their entire codebase architecture. And if they do? I'll just update the patcher.
-
 ## Installation
 
 1. Install Node.js (if not already installed)
