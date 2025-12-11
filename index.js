@@ -444,13 +444,19 @@ async function patchApp() {
 	}
 	console.log(chalk.greenBright`[+] Inject code loaded successfully`);
 
+	// Step 8: Read files and check if already patched
+	let preloadContent = fs.readFileSync(preloadPath, "utf-8");
+
+	const electronVarName = preloadContent.includes("electron_1") ? "electron_1" : "electron";
+	console.log(chalk.greenBright`[+] Detected electron variable: ${electronVarName}`);
+
 	const preloadPatchCode = `
 (function loadInjectScript() {
 	const injectCode = ${JSON.stringify(injectCode)};
 	
 	function injectViaWebFrame() {
 		try {
-			const { webFrame } = electron_1;
+			const { webFrame } = ${electronVarName};
 			if (webFrame && webFrame.executeJavaScript) {
 				webFrame.executeJavaScript(injectCode).then(() => console.log("[PRELOAD] Injected via webFrame.executeJavaScript")).catch(err => console.error("[PRELOAD] webFrame injection failed:", err));
 				return true;
@@ -476,9 +482,6 @@ async function patchApp() {
 	}
 })();
 `;
-
-	// Step 8: Read files and check if already patched
-	let preloadContent = fs.readFileSync(preloadPath, "utf-8");
 	const isPreloadPatched = preloadContent.includes("loadInjectScript");
 
 	if (isPreloadPatched) {
@@ -499,20 +502,21 @@ async function patchApp() {
 		preloadContent = preloadContent.replace(preloadPatchRegex, "");
 	}
 
-	// Step 9: Patch preload file - find line with electron_1 and insert patch code below it
+	// Step 9: Patch preload file - find line with electron import and insert patch code below it
 	console.log(chalk.yellowBright`[+] Applying preload patch...`);
 	const preloadLines = preloadContent.split("\n");
 	let preloadInsertIndex = -1;
 
 	for (let i = 0; i < preloadLines.length; i++) {
-		if (preloadLines[i].includes("electron_1")) {
+		const line = preloadLines[i];
+		if (line.includes("require(\"electron\")") || line.includes("require('electron')") || line.includes("electron_1")) {
 			preloadInsertIndex = i + 1;
 			break;
 		}
 	}
 
 	if (preloadInsertIndex === -1) {
-		console.error(chalk.redBright`[-] Could not find insertion point (electron_1) in ${path.basename(preloadPath)}`);
+		console.error(chalk.redBright`[-] Could not find insertion point (electron import) in ${path.basename(preloadPath)}`);
 		rm(extractPath);
 		process.exit(1);
 	}
