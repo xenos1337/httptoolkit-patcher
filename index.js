@@ -73,7 +73,7 @@ function fetchJson(url) {
 		const options = {
 			headers: {
 				"User-Agent": "httptoolkit-patcher",
-				"Accept": "application/vnd.github.v3+json",
+				Accept: "application/vnd.github.v3+json",
 			},
 		};
 		https
@@ -100,7 +100,7 @@ function compareVersions(v1, v2) {
 	const normalize = (/** @type {string} */ v) => v.replace(/^v/, "").split(".").map(Number);
 	const parts1 = normalize(v1);
 	const parts2 = normalize(v2);
-	
+
 	for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
 		const num1 = parts1[i] || 0;
 		const num2 = parts2[i] || 0;
@@ -116,18 +116,18 @@ function compareVersions(v1, v2) {
 async function checkForUpdates() {
 	try {
 		const tags = await fetchJson(`https://api.github.com/repos/${GITHUB_REPO}/tags`);
-		
+
 		if (!tags || tags.length === 0) {
 			return; // No tags found, skip update check
 		}
-		
+
 		// Tags are returned in order, first one is the latest
 		const latestTag = tags[0].name;
 		const latestVersion = latestTag.replace(/^v/, "");
-		
+
 		if (compareVersions(latestVersion, LOCAL_VERSION) > 0) {
 			console.log(chalk.yellowBright`\n╔════════════════════════════════════════════════════════════╗`);
-			console.log(chalk.yellowBright`║` + chalk.white`  A new version is available: ` + chalk.greenBright`v${latestVersion}` + chalk.white` (current: ` + chalk.gray`v${LOCAL_VERSION}` + chalk.white`)  ` + chalk.yellowBright`    ║`);
+			console.log(chalk.yellowBright`║` + chalk.white`   A new version is available: ` + chalk.greenBright`v${latestVersion}` + chalk.white` (current: ` + chalk.gray`v${LOCAL_VERSION}` + chalk.white`)  ` + chalk.yellowBright`  ║`);
 			console.log(chalk.yellowBright`║` + chalk.white`  Update: ` + chalk.cyanBright`https://github.com/${GITHUB_REPO}` + chalk.white`  ` + chalk.yellowBright`║`);
 			console.log(chalk.yellowBright`╚════════════════════════════════════════════════════════════╝\n`);
 		}
@@ -150,7 +150,11 @@ function rm(dirPath) {
 
 // Find HTTP Toolkit installation path
 async function findAppPath() {
-	const possiblePaths = isWin ? [path.join("C:", "Program Files", "HTTP Toolkit", "resources"), path.join("C:", "Program Files (x86)", "HTTP Toolkit", "resources"), path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || "", "AppData", "Local"), "Programs", "HTTP Toolkit", "resources")] : isMac ? ["/Applications/HTTP Toolkit.app/Contents/Resources"] : ["/opt/HTTP Toolkit/resources", "/opt/httptoolkit/resources"];
+	const possiblePaths = isWin
+		? [path.join("C:", "Program Files", "HTTP Toolkit", "resources"), path.join("C:", "Program Files (x86)", "HTTP Toolkit", "resources"), path.join(process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || "", "AppData", "Local"), "Programs", "HTTP Toolkit", "resources")]
+		: isMac
+		? ["/Applications/HTTP Toolkit.app/Contents/Resources"]
+		: ["/opt/HTTP Toolkit/resources", "/opt/httptoolkit/resources"];
 
 	for (const p of possiblePaths) {
 		if (fs.existsSync(path.join(p, "app.asar"))) {
@@ -244,7 +248,7 @@ function checkPermissions(filePath) {
 	try {
 		// Check write access to the file/directory
 		fs.accessSync(filePath, fs.constants.W_OK);
-		
+
 		// Check if we can create directories
 		const testDirPath = path.join(path.dirname(filePath), `.test_${Date.now()}`);
 		try {
@@ -254,7 +258,7 @@ function checkPermissions(filePath) {
 			console.error(chalk.redBright`[-] Cannot create directories in ${path.dirname(filePath)}: ${dirError.message}`);
 			return false;
 		}
-		
+
 		console.log(chalk.greenBright`[+] Permissions check passed for ${filePath}`);
 		return true;
 	} catch (e) {
@@ -309,18 +313,130 @@ async function killHttpToolkit() {
 	}
 }
 
+// Resolve the base installation directory (without the trailing resources folder)
+function getBinaryBasePath(resourcesPath) {
+	const normalized = resourcesPath.replace(/[\\/]+$/, "");
+	if (normalized.toLowerCase().endsWith("resources")) {
+		return path.dirname(normalized);
+	}
+	return normalized;
+}
+
+// Determine the executable path for HTTP Toolkit based on platform
+function getExecutablePath(resourcesPath) {
+	const basePath = getBinaryBasePath(resourcesPath);
+	const candidates = isWin ? [path.join(basePath, "HTTP Toolkit.exe"), path.join(basePath, "httptoolkit.exe")] : isMac ? [path.join(basePath, "MacOS", "HTTP Toolkit"), path.join(basePath, "MacOS", "HTTP Toolkit Preview")] : [path.join(basePath, "httptoolkit"), path.join(basePath, "HTTP Toolkit")];
+
+	for (const candidate of candidates) {
+		if (fs.existsSync(candidate)) {
+			return candidate;
+		}
+	}
+
+	throw new Error(`Could not locate HTTP Toolkit executable near ${resourcesPath}`);
+}
+
+// Extract hashes from integrity check output
+function extractIntegrityHashes(output) {
+	const regex = /Integrity check failed for asar archive[\s\S]*?\(\s*([0-9a-f]{64})\s*vs\s*([0-9a-f]{64})\s*\)/i;
+	const match = output.match(regex);
+	if (!match) return null;
+	return {
+		originalHash: match[1],
+		newHash: match[2],
+	};
+}
+
+// Launch the app once to grab integrity hashes from its crash output
+async function captureIntegrityHashes(executablePath) {
+	return new Promise((resolve, reject) => {
+		let output = "";
+		let finished = false;
+		const child = spawn(executablePath, {
+			cwd: path.dirname(executablePath),
+			stdio: ["ignore", "pipe", "pipe"],
+			windowsHide: true,
+		});
+
+		const timeout = setTimeout(() => {
+			if (!finished) {
+				finished = true;
+				child.kill();
+				reject(new Error("Timed out waiting for integrity check output"));
+			}
+		}, 20000);
+
+		const handleData = data => {
+			output += data.toString();
+			const hashes = extractIntegrityHashes(output);
+			if (hashes && !finished) {
+				finished = true;
+				clearTimeout(timeout);
+				child.kill();
+				resolve(hashes);
+			}
+		};
+
+		child.stdout.on("data", handleData);
+		child.stderr.on("data", handleData);
+
+		child.on("error", err => {
+			if (!finished) {
+				finished = true;
+				clearTimeout(timeout);
+				reject(err);
+			}
+		});
+
+		child.on("exit", () => {
+			if (!finished) {
+				clearTimeout(timeout);
+				const hashes = extractIntegrityHashes(output);
+				if (hashes) {
+					resolve(hashes);
+				} else {
+					reject(new Error("Could not find integrity hashes in HTTP Toolkit output"));
+				}
+			}
+		});
+	});
+}
+
+// Replace all occurrences of the original hash with the new hash inside the binary
+function patchExecutableHash(executablePath, originalHash, newHash) {
+	if (originalHash.length !== newHash.length) {
+		throw new Error("Hash lengths do not match; cannot safely patch binary");
+	}
+
+	const binary = fs.readFileSync(executablePath);
+	const originalBuf = Buffer.from(originalHash, "utf-8");
+	const newBuf = Buffer.from(newHash, "utf-8");
+
+	let occurrences = 0;
+	let idx = binary.indexOf(originalBuf);
+	while (idx !== -1) {
+		newBuf.copy(binary, idx);
+		occurrences += 1;
+		idx = binary.indexOf(originalBuf, idx + originalBuf.length);
+	}
+
+	if (occurrences === 0) {
+		throw new Error("Original hash not found in binary");
+	}
+
+	fs.writeFileSync(executablePath, binary);
+	return occurrences;
+}
+
 // Unpatch/restore function
 async function unpatchApp() {
 	console.log(chalk.blueBright`[+] HTTP Toolkit Unpatcher Started`);
 
-	// Step 1: Find app path
 	const appPath = await findAppPath();
 	console.log(chalk.greenBright`[+] HTTP Toolkit found at ${appPath}`);
 
-	// Step 2: Kill HTTP Toolkit if running
 	await killHttpToolkit();
 
-	// Step 3: Check permissions
 	const asarPath = path.join(appPath, "app.asar");
 	const backupPath = path.join(appPath, "app.asar.bak");
 	const extractPath = path.join(appPath, "app.asar_extracted");
@@ -340,14 +456,12 @@ async function unpatchApp() {
 		await requestElevation();
 	}
 
-	// Step 4: Check if backup exists
 	if (!fs.existsSync(backupPath)) {
 		console.error(chalk.redBright`[-] Backup file not found at ${backupPath}`);
 		console.error(chalk.redBright`[-] Cannot unpatch without backup file`);
 		process.exit(1);
 	}
 
-	// Step 5: Restore from backup
 	console.log(chalk.yellowBright`[+] Restoring from backup...`);
 	try {
 		fs.copyFileSync(backupPath, asarPath);
@@ -357,14 +471,12 @@ async function unpatchApp() {
 		process.exit(1);
 	}
 
-	// Step 6: Clean up extracted files if they exist
 	if (fs.existsSync(extractPath)) {
 		console.log(chalk.yellowBright`[+] Removing extracted files...`);
 		rm(extractPath);
 		console.log(chalk.greenBright`[+] Cleaned up extracted files`);
 	}
 
-	// Step 7: Optionally remove backup
 	const removeBackup = await prompt("Do you want to remove the backup file? (y/n): ");
 	if (removeBackup.toLowerCase() === "y" || removeBackup.toLowerCase() === "yes") {
 		fs.rmSync(backupPath, { force: true });
@@ -378,14 +490,11 @@ async function unpatchApp() {
 async function patchApp() {
 	console.log(chalk.blueBright`[+] HTTP Toolkit Patcher Started`);
 
-	// Step 1: Find app path
 	const appPath = await findAppPath();
 	console.log(chalk.greenBright`[+] HTTP Toolkit found at ${appPath}`);
 
-	// Step 2: Kill HTTP Toolkit if running
 	await killHttpToolkit();
 
-	// Step 3: Check permissions
 	const asarPath = path.join(appPath, "app.asar");
 
 	// Check if we have write permissions on both the directory and the file
@@ -403,7 +512,6 @@ async function patchApp() {
 		await requestElevation();
 	}
 
-	// Step 4: Backup app.asar
 	const backupPath = path.join(appPath, "app.asar.bak");
 	if (!fs.existsSync(backupPath)) {
 		console.log(chalk.yellowBright`[+] Creating backup...`);
@@ -411,14 +519,12 @@ async function patchApp() {
 		console.log(chalk.greenBright`[+] Backup created at ${backupPath}`);
 	}
 
-	// Step 5: Extract app.asar
 	const extractPath = path.join(appPath, "app.asar_extracted");
 	console.log(chalk.yellowBright`[+] Extracting app.asar...`);
 	rm(extractPath);
 	asar.extractAll(asarPath, extractPath);
 	console.log(chalk.greenBright`[+] Extracted to ${extractPath}`);
 
-	// Step 6: Check if preload.cjs exists
 	const preloadPath = path.join(extractPath, "build", "preload.cjs");
 	if (!fs.existsSync(preloadPath)) {
 		console.error(chalk.redBright`[-] preload.cjs not found in ${path.join(extractPath, "build")}`);
@@ -428,7 +534,6 @@ async function patchApp() {
 	}
 	console.log(chalk.greenBright`[+] Found preload.cjs`);
 
-	// Step 7: Read inject.js from local file (same directory as this script)
 	console.log(chalk.yellowBright`[+] Reading inject code from local file...`);
 	const injectJsPath = path.join(path.dirname(__filename), "inject.js");
 	if (!fs.existsSync(injectJsPath)) {
@@ -444,7 +549,6 @@ async function patchApp() {
 	}
 	console.log(chalk.greenBright`[+] Inject code loaded successfully`);
 
-	// Step 8: Read files and check if already patched
 	let preloadContent = fs.readFileSync(preloadPath, "utf-8");
 
 	const electronVarName = preloadContent.includes("electron_1") ? "electron_1" : "electron";
@@ -496,20 +600,19 @@ async function patchApp() {
 
 		// Remove existing patches
 		console.log(chalk.yellowBright`[+] Replacing existing patches...`);
-		
+
 		// Remove preload patch
 		const preloadPatchRegex = /\n?\(function loadInjectScript\(\) \{[\s\S]*?\}\)\(\);/;
 		preloadContent = preloadContent.replace(preloadPatchRegex, "");
 	}
 
-	// Step 9: Patch preload file - find line with electron import and insert patch code below it
 	console.log(chalk.yellowBright`[+] Applying preload patch...`);
 	const preloadLines = preloadContent.split("\n");
 	let preloadInsertIndex = -1;
 
 	for (let i = 0; i < preloadLines.length; i++) {
 		const line = preloadLines[i];
-		if (line.includes("require(\"electron\")") || line.includes("require('electron')") || line.includes("electron_1")) {
+		if (line.includes('require("electron")') || line.includes("require('electron')") || line.includes("electron_1")) {
 			preloadInsertIndex = i + 1;
 			break;
 		}
@@ -528,35 +631,55 @@ async function patchApp() {
 	fs.writeFileSync(preloadPath, preloadContent, "utf-8");
 	console.log(chalk.greenBright`[+] ${path.basename(preloadPath)} patched successfully`);
 
-
-	// Step 10: Repackage app.asar
 	console.log(chalk.yellowBright`[+] Repackaging app.asar...`);
 	await asar.createPackage(extractPath, asarPath);
 	console.log(chalk.greenBright`[+] app.asar repackaged successfully`);
 
-	// Step 11: Clean up
+	let executablePath;
+	try {
+		executablePath = getExecutablePath(appPath);
+	} catch (e) {
+		rm(extractPath);
+		console.error(chalk.redBright`[-] ${e.message}`);
+		process.exit(1);
+	}
+
+	console.log(chalk.yellowBright`[+] Launching HTTP Toolkit to read integrity hashes...`);
+	let hashes;
+	try {
+		hashes = await captureIntegrityHashes(executablePath);
+	} catch (e) {
+		rm(extractPath);
+		console.error(chalk.redBright`[-] Failed to capture integrity hashes: ${e.message}`);
+		process.exit(1);
+	}
+
+	console.log(chalk.greenBright`[+] Integrity hashes captured`);
+	console.log(chalk.white`    Original hash: ${hashes.originalHash}`);
+	console.log(chalk.white`    New asar hash: ${hashes.newHash}`);
+
+	try {
+		const replacements = patchExecutableHash(executablePath, hashes.originalHash, hashes.newHash);
+		console.log(chalk.greenBright`[+] Patched binary hash (${replacements} replacement${replacements === 1 ? "" : "s"})`);
+	} catch (e) {
+		rm(extractPath);
+		console.error(chalk.redBright`[-] Failed to patch binary hash: ${e.message}`);
+		process.exit(1);
+	}
+
 	console.log(chalk.yellowBright`[+] Cleaning up temporary files...`);
 	rm(extractPath);
 	console.log(chalk.greenBright`[+] Successfully patched!`);
 
-	// Step 12: Open HTTP Toolkit as detached process
 	console.log(chalk.blueBright`[+] Opening HTTP Toolkit...`);
 	try {
-		if (isLinux) {
-			// Linux: Cannot auto-launch reliably, show manual instructions
-			console.log(chalk.yellowBright`[!] HTTP Toolkit has been successfully patched`);
-			console.log(chalk.yellowBright`[!] Please manually launch HTTP Toolkit from your applications menu or using the command:`);
-			console.log(chalk.blueBright`    httptoolkit`);
-		} else {
-			const command = isWin ? `"${path.resolve(appPath, "..", "HTTP Toolkit.exe")}"` : isMac ? 'open -a "HTTP Toolkit"' : "httptoolkit";
-			const child = spawn(command, {
-				stdio: "ignore",
-				shell: true,
-				detached: true,
-			});
-			child.unref();
-			console.log(chalk.greenBright`[+] HTTP Toolkit launched successfully`);
-		}
+		const child = spawn(executablePath, {
+			stdio: "ignore",
+			shell: false,
+			detached: true,
+		});
+		child.unref();
+		console.log(chalk.greenBright`[+] HTTP Toolkit launched successfully`);
 	} catch (e) {
 		console.error(chalk.yellowBright`[!] Could not auto-start HTTP Toolkit: ${e.message}`);
 		console.log(chalk.blueBright`[+] Please start HTTP Toolkit manually`);
