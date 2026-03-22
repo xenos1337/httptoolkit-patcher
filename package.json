@@ -14,10 +14,10 @@
 	},
 	"license": "MIT",
 	"dependencies": {
-		"@electron/asar": "^4.0.1",
-		"chalk": "4"
+		"@electron/asar": "^4.1.0",
+		"chalk": "5.6.2"
 	},
 	"devDependencies": {
-		"@types/node": "^20.14.9"
+		"@types/node": "^25.5.0"
 	}
 }
