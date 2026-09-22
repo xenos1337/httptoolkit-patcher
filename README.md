@@ -1,3 +1,5 @@
+
+
 # HTTP Toolkit Patcher
 
 A minimal, cross-platform patcher for HTTP Toolkit that removes subscription requirements.
@@ -53,7 +55,7 @@ That's it. The patcher handles everything automatically and will request elevate
 2. Kills running processes
 3. Requests elevation if needed
 4. Backs up `app.asar`
-5. Extracts and patches `preload.js`
+5. Extracts and patches `preload.cjs`
 6. Repackages and launches
 
 ## Troubleshooting
@@ -73,4 +75,3 @@ This tool is provided as-is. Use at your own risk. For educational purposes only
 ## License
 
 MIT License - see [LICENSE](LICENSE) file.
-
